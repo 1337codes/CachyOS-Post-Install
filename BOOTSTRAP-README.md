@@ -6,12 +6,15 @@ From a fresh CachyOS install to a fully configured pentest system,
 
 ---
 
-## TL;DR — One long copy-paste
-
-If you know what you're doing, this is everything:
+## TL;DR — Set username once, then copy-paste
 
 ```bash
-# 1. Update
+# === Set your GitHub username ONCE ===
+export GH_USER="your-github-username"
+
+# === Then copy-paste everything below ===
+
+# 1. Update system
 sudo pacman -Syyu --noconfirm
 
 # 2. Bootstrap yay (AUR helper)
@@ -21,9 +24,9 @@ cd /tmp/yay-bin && makepkg -si --noconfirm && cd ~ && rm -rf /tmp/yay-bin
 
 # 3. Clone all setup repos
 mkdir -p ~/Projects && cd ~/Projects
-git clone https://github.com/<YOUR-USERNAME>/z13-setup.git
-git clone https://github.com/<YOUR-USERNAME>/cachyos-postinstall.git
-git clone https://github.com/1337codes/Arch-tools.git
+git clone "https://github.com/${GH_USER}/z13-setup.git"
+git clone "https://github.com/${GH_USER}/cachyos-postinstall.git"
+git clone "https://github.com/1337codes/Arch-tools.git"
 
 # 4. Run the scripts
 cd ~/Projects/z13-setup           && chmod +x *.sh && ./z13-cachyos-setup.sh
@@ -35,6 +38,9 @@ sudo reboot
 ```
 
 Done in ~45 minutes.
+
+> 💡 **The `export GH_USER=...` only persists for your current shell session.**
+> If you reboot or open a new terminal mid-install, set it again.
 
 ---
 
@@ -67,32 +73,62 @@ github.com/<yourname>/
 From your current working install, before you reinstall:
 
 ```bash
-# From your Z13 (alien account, NOT root)
-mkdir -p ~/Projects/z13-setup
+# Set username
+export GH_USER="your-github-username"
+
+# Move scripts into project folders
+mkdir -p ~/Projects/z13-setup ~/Projects/cachyos-postinstall
 mv ~/Downloads/z13-cachyos-setup.sh ~/Projects/z13-setup/
+mv ~/Downloads/cachyos-postinstall.sh ~/Projects/cachyos-postinstall/
+mv ~/Downloads/BOOTSTRAP-README.md ~/Projects/cachyos-postinstall/README.md
+
+# Push z13-setup
 cd ~/Projects/z13-setup
 git init
 echo "# Z13 CachyOS Setup" > README.md
 git add .
 git commit -m "Initial Z13 setup script"
 git branch -M main
-git remote add origin git@github.com:<yourname>/z13-setup.git
+git remote add origin "git@github.com:${GH_USER}/z13-setup.git"
 git push -u origin main
 
-# Same thing for cachyos-postinstall
-mkdir -p ~/Projects/cachyos-postinstall
-mv ~/Downloads/cachyos-postinstall.sh ~/Projects/cachyos-postinstall/
-mv ~/Downloads/cachyos-postinstall-README.md ~/Projects/cachyos-postinstall/README.md
+# Push cachyos-postinstall
 cd ~/Projects/cachyos-postinstall
 git init
 git add .
 git commit -m "Initial post-install script"
 git branch -M main
-git remote add origin git@github.com:<yourname>/cachyos-postinstall.git
+git remote add origin "git@github.com:${GH_USER}/cachyos-postinstall.git"
 git push -u origin main
 ```
 
-**After this, you can recover your entire setup with 5 commands.**
+**After this, you can recover your entire setup with the TL;DR snippet.**
+
+---
+
+## Make GH_USER permanent (optional)
+
+If you want `$GH_USER` available in every shell forever, add it to your shell rc:
+
+### Fish
+
+```bash
+echo "set -gx GH_USER your-github-username" >> ~/.config/fish/config.fish
+```
+
+### Bash
+
+```bash
+echo "export GH_USER=your-github-username" >> ~/.bashrc
+```
+
+### Zsh
+
+```bash
+echo "export GH_USER=your-github-username" >> ~/.zshrc
+```
+
+Then on any future terminal, `$GH_USER` is set automatically — no need to `export` it again.
 
 ---
 
@@ -107,6 +143,10 @@ No Chrome, no yay, no apps.
 # Verify who you are
 whoami       # → alien
 echo $SHELL  # → /usr/bin/fish
+
+# Set your GitHub username for this session
+export GH_USER="your-github-username"
+echo $GH_USER  # verify it's set
 ```
 
 ### Step 1 — System update
@@ -154,12 +194,12 @@ yay --version
 mkdir -p ~/Projects && cd ~/Projects
 
 # Hardware fixes
-git clone https://github.com/<yourname>/z13-setup.git
+git clone "https://github.com/${GH_USER}/z13-setup.git"
 
 # Daily apps + pentest + KDE menu
-git clone https://github.com/<yourname>/cachyos-postinstall.git
+git clone "https://github.com/${GH_USER}/cachyos-postinstall.git"
 
-# Tools-installer (1337codes)
+# Tools-installer (1337codes — public, no GH_USER needed)
 git clone https://github.com/1337codes/Arch-tools.git
 ```
 
@@ -190,6 +230,10 @@ Test after boot:
 - Bluetooth works
 - Suspend works (close lid for a moment)
 - OLED contrast looks right
+
+> ⚠️ **After reboot, your `$GH_USER` variable is gone** (unless you made it permanent
+> in your shell rc — see "Make GH_USER permanent" section above). Re-export it:
+> `export GH_USER="your-github-username"`
 
 ### Step 6 — Daily apps + pentest tools
 
@@ -326,7 +370,7 @@ chsh -s /usr/bin/fish
 # Logout/login — fish is now default
 ```
 
-### Time setting
+### Time setting (dual boot fix)
 
 CachyOS uses UTC by default, Windows uses local time — this can give wrong time
 in Windows. Fix:
@@ -367,6 +411,20 @@ Missing `base-devel`. Install:
 
 ```bash
 sudo pacman -S --needed base-devel
+```
+
+### `git clone https://github.com//z13-setup.git` (empty username)
+
+`$GH_USER` is not set or empty. Verify:
+
+```bash
+echo "[$GH_USER]"   # should show [your-github-username], not []
+```
+
+If empty, set it:
+
+```bash
+export GH_USER="your-github-username"
 ```
 
 ### Calamares "Hook 'openswap' cannot be found"
@@ -422,56 +480,6 @@ Setcap not granted (cachyos-postinstall.sh is supposed to do this):
 
 ```bash
 sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip $(command -v nmap)
-```
-
----
-
-## Complete bootstrap snippet (the "disaster recovery" copy-paste)
-
-Imagine: you reinstalled CachyOS, you're in a fresh install, nothing works yet. Paste this:
-
-```bash
-# === Pure copy-paste recovery ===
-
-# 1. Update system
-sudo pacman -Syyu --noconfirm
-
-# 2. Build deps + git
-sudo pacman -S --needed --noconfirm git base-devel curl wget
-
-# 3. yay
-cd /tmp
-git clone https://aur.archlinux.org/yay-bin.git
-cd yay-bin
-makepkg -si --noconfirm
-cd ~ && rm -rf /tmp/yay-bin
-
-# 4. Clone repos (replace USERNAME)
-mkdir -p ~/Projects && cd ~/Projects
-git clone https://github.com/USERNAME/z13-setup.git
-git clone https://github.com/USERNAME/cachyos-postinstall.git
-
-# 5. Z13 hardware
-cd ~/Projects/z13-setup
-chmod +x *.sh
-./z13-cachyos-setup.sh
-
-# (Reboot here if asked)
-
-# 6. Daily apps + pentest
-cd ~/Projects/cachyos-postinstall
-chmod +x *.sh
-./cachyos-postinstall.sh --yes
-
-# 7. Personal tools
-mkdir -p ~/Desktop/tools && cd ~/Desktop/tools
-git clone https://github.com/1337codes/Arch-tools.git
-cd Arch-tools && chmod +x *.sh
-./tools-setup.sh install -y
-
-# 8. Done
-exec fish
-echo "Setup complete. Logout/login for full effect."
 ```
 
 ---
