@@ -48,7 +48,7 @@ trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null || true' EXIT
 # =============================================================================
 # Config
 # =============================================================================
-readonly SCRIPT_VERSION="2.1.0-oscp"
+readonly SCRIPT_VERSION="2.1.1-oscp"
 readonly LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/cachyos-postinstall"
 readonly LOG_FILE="$LOG_DIR/postinstall-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$LOG_DIR"
@@ -211,7 +211,8 @@ install_base_dev() {
 
         # Languages / runtimes
         python python-pip
-        python2                # for legacy Kali scripts
+        # python2 — REMOVED: EOL since 2020, broken on modern Arch (no openssl-1.1)
+        # If you need it for legacy OSCP scripts: yay -S python2-bin
         nodejs npm
         go
         rust
@@ -254,6 +255,8 @@ install_base_dev() {
 # =============================================================================
 install_kali_basics() {
     section "4. Kali-default basics (netcat, rlwrap, etc.)"
+    # Only include packages that exist in CachyOS/Arch main repos.
+    # BlackArch-only tools are installed in step 5 (after BlackArch repo is added).
     local pkgs=(
         # Netcat variants
         gnu-netcat                # 'netcat' command
@@ -274,13 +277,10 @@ install_kali_basics() {
         nikto
         whatweb
         wafw00f
-        gospider                  # web spider
 
         # Web app testing
         sqlmap
         nuclei
-        commix                    # command injection
-        xsser                     # XSS
 
         # Cracking
         hashcat
@@ -294,46 +294,45 @@ install_kali_basics() {
         smbclient
         impacket                  # python3-impacket on Kali
         responder
-        bloodhound
-        enum4linux
-        smbmap
+        # bloodhound — moved to BlackArch (step 5)
+        enum4linux-ng             # 'enum4linux' on Kali; symlinked later
+        # smbmap — moved to BlackArch (step 5)
         cifs-utils
 
         # Exploitation
         metasploit
-        exploitdb                 # provides searchsploit
         sslscan
+        # exploitdb — provides searchsploit; moved to BlackArch (more reliable there)
 
         # Sniffing
         wireshark-qt
         tcpdump
         bettercap
-        ettercap
+        # ettercap — sometimes broken in Arch repos; fallback to BlackArch
 
         # Wireless
         aircrack-ng
         reaver
-        wifite
+        # wifite — moved to BlackArch (not always in main repos)
 
         # Forensics / steg
         binwalk
         foremost
-        steghide
-        exiftool
+        # steghide — moved to BlackArch
+        perl-image-exiftool       # 'exiftool' on Kali; provides /usr/bin/exiftool
 
         # Misc
         proxychains-ng
         tor
         torsocks
-        snmp                      # snmpwalk, snmpget
-        onesixtyone               # SNMP brute
-        snmpcheck
+        net-snmp                  # snmpwalk, snmpget — 'snmp' on Kali
+        # onesixtyone — moved to BlackArch
+        # snmpcheck — moved to BlackArch
 
         # Network mapping / recon
         masscan
         whois
-        dnsutils                  # dig, nslookup
-        bind                      # named utilities
+        bind                      # provides dig, nslookup
         traceroute
         mtr
 
@@ -476,6 +475,46 @@ setup_blackarch() {
         ls -la /usr/share/wordlists/ 2>/dev/null | grep -E "^[ld]" | head -15 | tee -a "$LOG_FILE"
     fi
     ok "Wordlists done"
+
+    section "5d. BlackArch-exclusive tools"
+    # These tools weren't installable in step 4 because they're only in BlackArch.
+    # Now that BlackArch repo is added, install them here.
+    if [[ $SKIP_BLACKARCH -eq 0 ]]; then
+        local blackarch_only=(
+            bloodhound                # AD enumeration
+            smbmap                    # SMB share mapping
+            steghide                  # Steganography
+            onesixtyone               # SNMP community brute
+            snmpcheck                 # SNMP enum
+            wifite2                   # Wireless attack automation (newer fork of wifite)
+            ettercap                  # MITM (when not in main repos)
+            commix                    # Command injection
+            xsser                     # XSS framework
+            gospider                  # Web spider
+            exploitdb                 # searchsploit (more reliable from blackarch)
+            evil-winrm                # WinRM shell (often only here)
+            theharvester              # OSINT email harvester
+            recon-ng                  # Recon framework
+            dnsrecon                  # DNS recon
+            fierce                    # Domain scanner
+            wpscan                    # WordPress scanner
+            joomscan                  # Joomla scanner
+            droopescan                # CMS scanner
+            arjun                     # HTTP parameter discovery
+            crlfuzz                   # CRLF injection
+            shodan                    # Shodan CLI
+            seclists                  # ensure (was earlier but cheap to re-confirm)
+        )
+
+        info "Installing BlackArch-exclusive tools (${#blackarch_only[@]} packages)..."
+        if confirm "Install these BlackArch tools?"; then
+            sudo pacman -S --needed --noconfirm "${blackarch_only[@]}" 2>&1 | tail -10 \
+                || warn "Some BlackArch tools failed (will continue)"
+        fi
+        ok "BlackArch-exclusive tools done"
+    else
+        warn "Skipped (--skip-blackarch)"
+    fi
 }
 
 # =============================================================================
@@ -988,6 +1027,17 @@ fix_kali_compatibility() {
     if command -v enum4linux-ng >/dev/null 2>&1 && ! command -v enum4linux >/dev/null 2>&1; then
         sudo ln -sf "$(command -v enum4linux-ng)" /usr/local/bin/enum4linux
         ok "enum4linux → enum4linux-ng"
+    fi
+
+    # On Arch, net-snmp provides snmpwalk/snmpget. On Kali they're in 'snmp' package.
+    # No symlinks needed — same binaries, just different package name.
+    if command -v snmpwalk >/dev/null 2>&1; then
+        ok "snmpwalk/snmpget available (from net-snmp)"
+    fi
+
+    # exiftool is in perl-image-exiftool on Arch — already installs as 'exiftool'
+    if command -v exiftool >/dev/null 2>&1; then
+        ok "exiftool available"
     fi
 
     # Permissions: nmap raw socket access without sudo
