@@ -48,7 +48,7 @@ trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null || true' EXIT
 # =============================================================================
 # Config
 # =============================================================================
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="2.1.0-oscp"
 readonly LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/cachyos-postinstall"
 readonly LOG_FILE="$LOG_DIR/postinstall-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$LOG_DIR"
@@ -263,8 +263,9 @@ install_kali_basics() {
 
         # Shell upgrade utility
         rlwrap                    # arrow-key support in raw shells
+        expect                    # for unbuffer / automation
 
-        # File transfer / web
+        # Web fuzzing / discovery
         gobuster
         feroxbuster
         ffuf
@@ -273,10 +274,13 @@ install_kali_basics() {
         nikto
         whatweb
         wafw00f
+        gospider                  # web spider
 
-        # Web app
+        # Web app testing
         sqlmap
         nuclei
+        commix                    # command injection
+        xsser                     # XSS
 
         # Cracking
         hashcat
@@ -284,12 +288,16 @@ install_kali_basics() {
         hydra
         medusa
         ncrack
+        cewl                      # custom wordlists from web
 
         # SMB / AD / Windows
         smbclient
         impacket                  # python3-impacket on Kali
         responder
         bloodhound
+        enum4linux
+        smbmap
+        cifs-utils
 
         # Exploitation
         metasploit
@@ -300,10 +308,12 @@ install_kali_basics() {
         wireshark-qt
         tcpdump
         bettercap
+        ettercap
 
         # Wireless
         aircrack-ng
         reaver
+        wifite
 
         # Forensics / steg
         binwalk
@@ -316,6 +326,25 @@ install_kali_basics() {
         tor
         torsocks
         snmp                      # snmpwalk, snmpget
+        onesixtyone               # SNMP brute
+        snmpcheck
+
+        # Network mapping / recon
+        masscan
+        whois
+        dnsutils                  # dig, nslookup
+        bind                      # named utilities
+        traceroute
+        mtr
+
+        # Misc helpers
+        cmatrix                   # because hacker
+        figlet                    # ascii banners
+        toilet
+        flameshot                 # screenshot tool (multi-monitor support)
+        keepassxc                 # password manager (for engagement creds)
+        gimp                      # image editing for screenshots
+        kdenlive                  # video editing (for PoCs)
     )
 
     info "Packages: ${#pkgs[@]} essentials"
@@ -373,10 +402,10 @@ setup_blackarch() {
     fi
     ok "BlackArch officials done"
 
-    section "5c. Wordlists"
-    if confirm "Install seclists + wordlists?"; then
-        sudo pacman -S --needed --noconfirm seclists wordlists fuzzdb 2>&1 | tail -5 \
-            || warn "Wordlists install had issues"
+    section "5c. Wordlists (Kali-compatible paths)"
+    if confirm "Install seclists + wordlists + dirb wordlists?"; then
+        sudo pacman -S --needed --noconfirm seclists wordlists fuzzdb dirb 2>&1 | tail -5 \
+            || warn "Some wordlists install failed"
 
         # Auto-decompress rockyou.txt if compressed
         for path in /usr/share/wordlists/rockyou.txt.gz /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt.tar.gz; do
@@ -387,6 +416,64 @@ setup_blackarch() {
                 fi
             fi
         done
+
+        # === Kali-compatible wordlist paths ===
+        # On Kali, all wordlists are under /usr/share/wordlists/.
+        # On Arch, they're scattered across /usr/share/{seclists,dirb,wfuzz,...}
+        # Create symlinks so Kali tutorials "just work".
+        info "Setting up Kali-compatible wordlist paths in /usr/share/wordlists/..."
+        sudo mkdir -p /usr/share/wordlists
+
+        # SecLists - the most important one, all OSCP guides use it
+        if [[ -d /usr/share/seclists && ! -e /usr/share/wordlists/seclists ]]; then
+            sudo ln -sfn /usr/share/seclists /usr/share/wordlists/seclists
+            sudo ln -sfn /usr/share/seclists /usr/share/wordlists/SecLists  # case variant
+            ok "Symlink: /usr/share/wordlists/seclists → /usr/share/seclists"
+        fi
+
+        # dirb wordlists (provides /usr/share/wordlists/dirb on Kali)
+        if [[ -d /usr/share/dirb/wordlists && ! -e /usr/share/wordlists/dirb ]]; then
+            sudo ln -sfn /usr/share/dirb/wordlists /usr/share/wordlists/dirb
+            ok "Symlink: /usr/share/wordlists/dirb → /usr/share/dirb/wordlists"
+        fi
+
+        # dirbuster wordlists (commonly referenced in OSCP)
+        # On Kali: /usr/share/wordlists/dirbuster -> /usr/share/dirbuster/wordlists
+        if [[ -d /usr/share/dirbuster/wordlists && ! -e /usr/share/wordlists/dirbuster ]]; then
+            sudo ln -sfn /usr/share/dirbuster/wordlists /usr/share/wordlists/dirbuster
+            ok "Symlink: /usr/share/wordlists/dirbuster → /usr/share/dirbuster/wordlists"
+        elif [[ -d /usr/share/seclists/Discovery/Web-Content && ! -e /usr/share/wordlists/dirbuster ]]; then
+            # Fallback: symlink to seclists Web-Content (functionally similar)
+            sudo ln -sfn /usr/share/seclists/Discovery/Web-Content /usr/share/wordlists/dirbuster
+            ok "Symlink: /usr/share/wordlists/dirbuster → seclists/Discovery/Web-Content (fallback)"
+        fi
+
+        # fuzzdb
+        if [[ -d /usr/share/fuzzdb && ! -e /usr/share/wordlists/fuzzdb ]]; then
+            sudo ln -sfn /usr/share/fuzzdb /usr/share/wordlists/fuzzdb
+            ok "Symlink: /usr/share/wordlists/fuzzdb → /usr/share/fuzzdb"
+        fi
+
+        # Common shortcut: /usr/share/wordlists/rockyou.txt should always exist
+        # (if we got it from seclists, link it to top level)
+        local rockyou_src
+        for cand in \
+            /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt \
+            /usr/share/wordlists/rockyou.txt \
+            /usr/share/wordlists/seclists/Passwords/Leaked-Databases/rockyou.txt; do
+            if [[ -f "$cand" ]]; then
+                rockyou_src="$cand"
+                break
+            fi
+        done
+        if [[ -n "${rockyou_src:-}" && ! -e /usr/share/wordlists/rockyou.txt ]]; then
+            sudo ln -sf "$rockyou_src" /usr/share/wordlists/rockyou.txt
+            ok "Symlink: /usr/share/wordlists/rockyou.txt → $rockyou_src"
+        fi
+
+        # Show final layout
+        info "Final wordlists layout:"
+        ls -la /usr/share/wordlists/ 2>/dev/null | grep -E "^[ld]" | head -15 | tee -a "$LOG_FILE"
     fi
     ok "Wordlists done"
 }
@@ -421,29 +508,443 @@ install_daily_apps() {
 # 7. AUR pentest tools
 # =============================================================================
 install_aur_pentest() {
-    section "7. AUR pentest tools"
+    section "7. AUR pentest tools (OSCP-essentials)"
     if [[ $SKIP_PENTEST -eq 1 ]] || [[ $SKIP_AUR -eq 1 ]]; then
         warn "Skipped"
         return 0
     fi
 
-    local pkgs=(
-        kerbrute-bin
-        autorecon
-        certipy-ad
-        sliver-bin
-        netexec-git
-        pwndbg
-        ghidra
-        burpsuite
+    # ==[ Active Directory & Windows ]==
+    local ad_pkgs=(
+        kerbrute-bin              # Kerberos pre-auth username enum + spray
+        certipy-ad                # AD CS abuse (ESC1-ESC15)
+        netexec-git               # NetExec (nxc) - successor to crackmapexec
+        evil-winrm                # WinRM shell
+        impacket                  # impacket scripts (already in pacman, listed for clarity)
+        bloodhound-python-git     # Python BloodHound collector
+        rusthound                 # Rust BloodHound (faster)
+        adidnsdump-git            # AD DNS dumping
+        powerview-git             # PowerView ported to Python
+        pywerview                 # alternative PowerView
+        ldapdomaindump            # LDAP info dump
+        donpapi-git               # DPAPI dumping
     )
 
-    info "Packages: ${pkgs[*]}"
-    if confirm "Install AUR pentest tools (~1-2 GB)?"; then
-        yay -S --needed --noconfirm "${pkgs[@]}" 2>&1 | tail -10 \
-            || warn "Some AUR pentest tools failed (likely existing-package conflicts)"
+    # ==[ Tunneling & Pivoting ]==
+    local tunnel_pkgs=(
+        ligolo-ng                 # ⭐ THE pivoting tool for OSCP
+        chisel                    # HTTP-tunneled TCP
+        sshuttle                  # poor man's VPN over SSH
+        gost                      # advanced tunneling
+        sshpass                   # automated ssh
+    )
+
+    # ==[ Web App Testing ]==
+    local web_pkgs=(
+        burpsuite                 # community edition (Pro = manual install)
+        zaproxy                   # OWASP ZAP
+        caido-bin                 # modern Burp alternative
+        amass                     # subdomain enum
+        subfinder                 # subdomain enum (ProjectDiscovery)
+        httpx-bin                 # http probe (NOT python httpx!)
+        katana-bin                # web crawler
+        dalfox                    # XSS scanner
+        knock                     # subdomain enum
+        photon-git                # OSINT crawler
+    )
+
+    # ==[ Exploitation & C2 ]==
+    local exploit_pkgs=(
+        sliver-bin                # Modern C2 framework
+        pwncat-cs                 # netcat replacement w/ post-exploit features
+        revshells                 # generate reverse shells
+        msfpc                     # MSF payload generator
+    )
+
+    # ==[ Recon & Enumeration ]==
+    local recon_pkgs=(
+        autorecon                 # automated recon (huge time saver for OSCP)
+        rustscan                  # super fast port scanner
+        nuclei-templates          # nuclei templates
+        gowitness                 # screenshot websites
+        eyewitness                # alternative screenshot tool
+        dnsx-bin                  # fast DNS toolkit
+        nmap-vulners              # nmap vuln scripts
+    )
+
+    # ==[ Privesc Helpers ]==
+    local privesc_pkgs=(
+        peass-ng                  # linpeas + winpeas
+        linux-exploit-suggester   # linux privesc
+        windows-exploit-suggester # windows privesc
+        pspy-bin                  # process spy (no root)
+    )
+
+    # ==[ Cracking & Hashing ]==
+    local crack_pkgs=(
+        crackmapexec              # legacy cme (some still prefer over nxc)
+        hashid                    # hash type identifier
+        name-that-hash            # alternative hash identifier
+        hash-identifier
+        ophcrack                  # rainbow tables
+        hcxtools                  # hashcat helper for wifi
+        hcxdumptool
+    )
+
+    # ==[ Reverse Engineering ]==
+    local re_pkgs=(
+        ghidra                    # NSA's RE tool
+        cutter                    # radare2 GUI
+        pwndbg                    # gdb plugin for exploit dev
+        gef                       # alternative gdb plugin
+        peda                      # alternative gdb plugin
+        binaryninja-free          # free version of Binary Ninja
+    )
+
+    # ==[ Misc OSCP utilities ]==
+    local misc_pkgs=(
+        seclists                  # already in pacman but ensure
+        payloadsallthethings-git  # PayloadsAllTheThings
+        rockyou                   # rockyou wordlist (if not in seclists)
+        oscp-pwk-scripts          # OSCP-flavored helpers (if available)
+        sherlock                  # username OSINT
+        holehe                    # email OSINT
+        gitleaks                  # secrets scanner
+        trufflehog-bin            # secrets scanner
+    )
+
+    # Merge all
+    local all_pkgs=(
+        "${ad_pkgs[@]}"
+        "${tunnel_pkgs[@]}"
+        "${web_pkgs[@]}"
+        "${exploit_pkgs[@]}"
+        "${recon_pkgs[@]}"
+        "${privesc_pkgs[@]}"
+        "${crack_pkgs[@]}"
+        "${re_pkgs[@]}"
+        "${misc_pkgs[@]}"
+    )
+
+    info "Categories overview:"
+    info "  Active Directory:  ${#ad_pkgs[@]} tools  (kerbrute, certipy, nxc, BloodHound, ...)"
+    info "  Tunneling/Pivot:   ${#tunnel_pkgs[@]} tools  (ligolo-ng, chisel, sshuttle, ...)"
+    info "  Web Testing:       ${#web_pkgs[@]} tools  (Burp, ZAP, amass, subfinder, ...)"
+    info "  Exploitation/C2:   ${#exploit_pkgs[@]} tools  (sliver, pwncat-cs, ...)"
+    info "  Recon/Enum:        ${#recon_pkgs[@]} tools  (autorecon, rustscan, gowitness, ...)"
+    info "  Privesc Helpers:   ${#privesc_pkgs[@]} tools  (linpeas, pspy, ...)"
+    info "  Cracking:          ${#crack_pkgs[@]} tools  (cme legacy, hashid, hcxtools, ...)"
+    info "  Reverse Eng.:      ${#re_pkgs[@]} tools  (ghidra, cutter, pwndbg, gef, peda, ...)"
+    info "  Misc:              ${#misc_pkgs[@]} tools  (PayloadsAllTheThings, sherlock, ...)"
+    info "Total: ${#all_pkgs[@]} AUR packages (~3-5 GB)"
+
+    if confirm "Install ALL AUR pentest tools (recommended for OSCP)?"; then
+        # Install in batches per category - some may fail without breaking everything
+        info "Installing AD tools..."
+        yay -S --needed --noconfirm "${ad_pkgs[@]}" 2>&1 | tail -5 || warn "Some AD pkgs failed"
+
+        info "Installing tunneling tools..."
+        yay -S --needed --noconfirm "${tunnel_pkgs[@]}" 2>&1 | tail -5 || warn "Some tunnel pkgs failed"
+
+        info "Installing web testing tools..."
+        yay -S --needed --noconfirm "${web_pkgs[@]}" 2>&1 | tail -5 || warn "Some web pkgs failed"
+
+        info "Installing exploitation/C2..."
+        yay -S --needed --noconfirm "${exploit_pkgs[@]}" 2>&1 | tail -5 || warn "Some exploit pkgs failed"
+
+        info "Installing recon tools..."
+        yay -S --needed --noconfirm "${recon_pkgs[@]}" 2>&1 | tail -5 || warn "Some recon pkgs failed"
+
+        info "Installing privesc helpers..."
+        yay -S --needed --noconfirm "${privesc_pkgs[@]}" 2>&1 | tail -5 || warn "Some privesc pkgs failed"
+
+        info "Installing cracking tools..."
+        yay -S --needed --noconfirm "${crack_pkgs[@]}" 2>&1 | tail -5 || warn "Some crack pkgs failed"
+
+        info "Installing reverse engineering tools..."
+        yay -S --needed --noconfirm "${re_pkgs[@]}" 2>&1 | tail -5 || warn "Some RE pkgs failed"
+
+        info "Installing misc utilities..."
+        yay -S --needed --noconfirm "${misc_pkgs[@]}" 2>&1 | tail -5 || warn "Some misc pkgs failed"
+    elif confirm "Install only essentials (AD + tunneling + autorecon + ligolo-ng)?"; then
+        local essentials=(
+            kerbrute-bin certipy-ad netexec-git evil-winrm
+            ligolo-ng chisel
+            autorecon rustscan
+            peass-ng pwncat-cs
+        )
+        yay -S --needed --noconfirm "${essentials[@]}" 2>&1 | tail -10 \
+            || warn "Some essentials failed"
     fi
     ok "AUR pentest tools done"
+}
+
+# =============================================================================
+# 7b. Manual downloads — tools that aren't in repos
+# =============================================================================
+install_manual_tools() {
+    section "7b. Manual tool downloads (not in AUR/repos)"
+    if [[ $SKIP_PENTEST -eq 1 ]]; then
+        warn "Skipped"
+        return 0
+    fi
+
+    local tools_dir="$HOME/.local/share/pentest-tools"
+    mkdir -p "$tools_dir"
+
+    if ! confirm "Download manual tools to $tools_dir?"; then
+        warn "Skipped"
+        return 0
+    fi
+
+    local bin_dir="$HOME/.local/bin"
+    mkdir -p "$bin_dir"
+
+    # Ensure ~/.local/bin is in PATH
+    if ! echo "$PATH" | grep -q "$bin_dir"; then
+        info "Adding $bin_dir to PATH..."
+        if [[ -f "$HOME/.config/fish/config.fish" ]]; then
+            echo "set -gx PATH \$HOME/.local/bin \$PATH" >> "$HOME/.config/fish/config.fish"
+        fi
+        if [[ -f "$HOME/.bashrc" ]]; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+        fi
+        if [[ -f "$HOME/.zshrc" ]]; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+        fi
+    fi
+
+    # ==[ PEASS-ng (linpeas + winpeas) ]==
+    info "Downloading PEASS-ng (linpeas + winpeas)..."
+    local peass_dir="$tools_dir/PEASS-ng"
+    if [[ ! -d "$peass_dir" ]]; then
+        git clone --depth=1 https://github.com/peass-ng/PEASS-ng.git "$peass_dir"
+    else
+        (cd "$peass_dir" && git pull --quiet) || warn "PEASS-ng pull failed"
+    fi
+
+    # ==[ PowerSploit ]==
+    info "Downloading PowerSploit..."
+    local ps_dir="$tools_dir/PowerSploit"
+    if [[ ! -d "$ps_dir" ]]; then
+        git clone --depth=1 https://github.com/PowerShellMafia/PowerSploit.git "$ps_dir"
+    else
+        (cd "$ps_dir" && git pull --quiet) || warn "PowerSploit pull failed"
+    fi
+
+    # ==[ PayloadsAllTheThings ]==
+    info "Downloading PayloadsAllTheThings (slow, ~500MB)..."
+    local pat_dir="$tools_dir/PayloadsAllTheThings"
+    if [[ ! -d "$pat_dir" ]]; then
+        git clone --depth=1 https://github.com/swisskyrepo/PayloadsAllTheThings.git "$pat_dir" \
+            || warn "PayloadsAllTheThings clone failed (try later)"
+    else
+        (cd "$pat_dir" && git pull --quiet) || warn "PayloadsAllTheThings pull failed"
+    fi
+
+    # ==[ HackTricks (offline reference) ]==
+    info "Downloading HackTricks book..."
+    local ht_dir="$tools_dir/hacktricks"
+    if [[ ! -d "$ht_dir" ]]; then
+        git clone --depth=1 https://github.com/HackTricks-wiki/hacktricks.git "$ht_dir" \
+            || warn "HackTricks clone failed"
+    fi
+
+    # ==[ Mimikatz binary ]==
+    info "Downloading Mimikatz..."
+    local mimi_dir="$tools_dir/mimikatz"
+    if [[ ! -f "$mimi_dir/mimikatz.exe" ]]; then
+        mkdir -p "$mimi_dir"
+        local mimi_url
+        mimi_url=$(curl -fsSL https://api.github.com/repos/gentilkiwi/mimikatz/releases/latest \
+                   | grep "browser_download_url.*mimikatz_trunk.zip" \
+                   | head -1 | cut -d'"' -f4)
+        if [[ -n "$mimi_url" ]]; then
+            curl -fsSL -o "$mimi_dir/mimikatz.zip" "$mimi_url"
+            (cd "$mimi_dir" && unzip -q -o mimikatz.zip && rm mimikatz.zip)
+            ok "Mimikatz downloaded"
+        else
+            warn "Could not fetch Mimikatz URL"
+        fi
+    fi
+
+    # ==[ Chisel binaries (linux + windows) ]==
+    info "Ensuring Chisel binaries (linux + windows)..."
+    local chisel_dir="$tools_dir/chisel"
+    mkdir -p "$chisel_dir"
+    if [[ ! -f "$chisel_dir/chisel_linux_amd64" ]]; then
+        local chisel_ver
+        chisel_ver=$(curl -fsSL https://api.github.com/repos/jpillora/chisel/releases/latest \
+                     | grep tag_name | cut -d'"' -f4 | tr -d 'v')
+        if [[ -n "$chisel_ver" ]]; then
+            curl -fsSL -o /tmp/chisel-linux.gz \
+                "https://github.com/jpillora/chisel/releases/download/v${chisel_ver}/chisel_${chisel_ver}_linux_amd64.gz"
+            curl -fsSL -o /tmp/chisel-windows.gz \
+                "https://github.com/jpillora/chisel/releases/download/v${chisel_ver}/chisel_${chisel_ver}_windows_amd64.gz"
+            gunzip -c /tmp/chisel-linux.gz > "$chisel_dir/chisel_linux_amd64"
+            gunzip -c /tmp/chisel-windows.gz > "$chisel_dir/chisel_windows_amd64.exe"
+            chmod +x "$chisel_dir/chisel_linux_amd64"
+            rm /tmp/chisel-linux.gz /tmp/chisel-windows.gz
+            ok "Chisel v$chisel_ver downloaded (linux + windows)"
+        fi
+    fi
+
+    # ==[ Ligolo-ng binaries (proxy + agent for windows) ]==
+    info "Ensuring Ligolo-ng binaries..."
+    local ligolo_dir="$tools_dir/ligolo-ng"
+    mkdir -p "$ligolo_dir"
+    if [[ ! -f "$ligolo_dir/agent.exe" ]]; then
+        local ligolo_ver
+        ligolo_ver=$(curl -fsSL https://api.github.com/repos/Nicocha30/ligolo-ng/releases/latest \
+                     | grep tag_name | cut -d'"' -f4)
+        if [[ -n "$ligolo_ver" ]]; then
+            local v="${ligolo_ver#v}"
+            # Linux proxy
+            curl -fsSL -o /tmp/ligolo-proxy.tar.gz \
+                "https://github.com/Nicocha30/ligolo-ng/releases/download/${ligolo_ver}/ligolo-ng_proxy_${v}_linux_amd64.tar.gz"
+            tar xzf /tmp/ligolo-proxy.tar.gz -C "$ligolo_dir/" proxy
+            mv "$ligolo_dir/proxy" "$ligolo_dir/proxy_linux"
+            # Windows agent
+            curl -fsSL -o /tmp/ligolo-agent.zip \
+                "https://github.com/Nicocha30/ligolo-ng/releases/download/${ligolo_ver}/ligolo-ng_agent_${v}_windows_amd64.zip"
+            (cd "$ligolo_dir" && unzip -q -o /tmp/ligolo-agent.zip)
+            chmod +x "$ligolo_dir/proxy_linux"
+            rm /tmp/ligolo-proxy.tar.gz /tmp/ligolo-agent.zip
+            ok "Ligolo-ng ${ligolo_ver} downloaded (proxy + agent)"
+        fi
+    fi
+
+    # ==[ Static binaries directory for upload to targets ]==
+    info "Building static binaries directory for transfer..."
+    local static_dir="$tools_dir/static-bins"
+    mkdir -p "$static_dir/linux" "$static_dir/windows"
+
+    # Static nmap (for transferring to targets)
+    if [[ ! -f "$static_dir/linux/nmap" ]]; then
+        curl -fsSL -o "$static_dir/linux/nmap" \
+            "https://github.com/andrew-d/static-binaries/raw/master/binaries/linux/x86_64/nmap" 2>/dev/null \
+            && chmod +x "$static_dir/linux/nmap" \
+            && ok "Static nmap downloaded"
+    fi
+
+    # Static socat
+    if [[ ! -f "$static_dir/linux/socat" ]]; then
+        curl -fsSL -o "$static_dir/linux/socat" \
+            "https://github.com/andrew-d/static-binaries/raw/master/binaries/linux/x86_64/socat" 2>/dev/null \
+            && chmod +x "$static_dir/linux/socat" \
+            && ok "Static socat downloaded"
+    fi
+
+    # ==[ Symlink convenience: pentest-tools alias ]==
+    info "Creating shell aliases for tools dir..."
+    cat > "$HOME/.config/pentest-tools-aliases.sh" <<EOF
+# Convenience env vars for pentest tools
+export PENTEST_TOOLS="$tools_dir"
+export PEASS="$peass_dir"
+export PAYLOADS="$pat_dir"
+export STATIC_BINS="$static_dir"
+export LIGOLO="$ligolo_dir"
+export CHISEL="$chisel_dir"
+
+# Quick access aliases
+alias linpeas-here='cp \$PEASS/linPEAS/linpeas.sh .'
+alias winpeas-here='cp \$PEASS/winPEAS/winPEASexe/winPEAS/bin/x64/Release/winPEASx64.exe .'
+alias serve-tools='cd \$PENTEST_TOOLS && python3 -m http.server 8000'
+EOF
+
+    # Source it from shells
+    for rc in ~/.bashrc ~/.zshrc; do
+        if [[ -f "$rc" ]] && ! grep -q "pentest-tools-aliases.sh" "$rc"; then
+            echo "[ -f \$HOME/.config/pentest-tools-aliases.sh ] && source \$HOME/.config/pentest-tools-aliases.sh" >> "$rc"
+        fi
+    done
+    if [[ -d "$HOME/.config/fish/conf.d" ]]; then
+        cat > "$HOME/.config/fish/conf.d/pentest-tools.fish" <<EOF
+# Convenience env vars for pentest tools
+set -gx PENTEST_TOOLS "$tools_dir"
+set -gx PEASS "$peass_dir"
+set -gx PAYLOADS "$pat_dir"
+set -gx STATIC_BINS "$static_dir"
+set -gx LIGOLO "$ligolo_dir"
+set -gx CHISEL "$chisel_dir"
+
+# Quick access aliases
+alias linpeas-here 'cp \$PEASS/linPEAS/linpeas.sh .'
+alias winpeas-here 'cp \$PEASS/winPEAS/winPEASexe/winPEAS/bin/x64/Release/winPEASx64.exe .'
+alias serve-tools 'cd \$PENTEST_TOOLS && python3 -m http.server 8000'
+EOF
+    fi
+
+    ok "Manual tools downloaded to: $tools_dir"
+    info "Quick access:"
+    info "  \$PENTEST_TOOLS = $tools_dir"
+    info "  \$PEASS         = $peass_dir       (linpeas/winpeas)"
+    info "  \$PAYLOADS      = $pat_dir         (PayloadsAllTheThings)"
+    info "  \$LIGOLO        = $ligolo_dir      (proxy + agent.exe)"
+    info "  \$CHISEL        = $chisel_dir      (linux + windows)"
+    info "  \$STATIC_BINS   = $static_dir      (static nmap, socat for upload)"
+    info "  serve-tools    → starts python http.server in tools dir"
+}
+
+# =============================================================================
+# 7c. Python pentest libraries (via pip --user)
+# =============================================================================
+install_python_pentest_libs() {
+    section "7c. Python pentest libraries"
+    if [[ $SKIP_PENTEST -eq 1 ]]; then
+        warn "Skipped"
+        return 0
+    fi
+
+    if ! confirm "Install Python pentest libraries (impacket helpers, ldap3, etc.)?"; then
+        warn "Skipped"
+        return 0
+    fi
+
+    local pip_pkgs=(
+        # Network/protocol libraries
+        ldap3                     # LDAP queries
+        dnspython                 # DNS toolkit
+        pyOpenSSL
+        cryptography
+
+        # AD-specific
+        bloodhound                # Python BloodHound
+        adidnsdump                # AD DNS dumping (also AUR)
+
+        # Web testing
+        requests
+        urllib3
+        beautifulsoup4
+        mechanicalsoup
+        playwright
+
+        # Crypto / hash
+        pycryptodome
+        passlib
+
+        # Misc utilities
+        rich                      # pretty terminal output
+        colorama
+        pyfiglet
+        tabulate
+        prettytable
+
+        # OSCP scripts often need these
+        pwntools                  # exploit dev framework
+        ropper                    # ROP gadgets
+        ROPgadget                 # ROP gadgets (alt)
+        capstone                  # disassembly engine
+        unicorn                   # CPU emulator
+        keystone-engine           # assembler
+    )
+
+    info "Packages: ${#pip_pkgs[@]} libraries"
+    pip3 install --user --break-system-packages "${pip_pkgs[@]}" 2>&1 | tail -10 \
+        || pip3 install --user "${pip_pkgs[@]}" 2>&1 | tail -10 \
+        || warn "Some pip packages failed"
+
+    ok "Python pentest libraries done"
 }
 
 # =============================================================================
@@ -506,6 +1007,242 @@ fix_kali_compatibility() {
 }
 
 # =============================================================================
+# 8b. Desktop integration — default apps, right-click, flameshot keybinding
+# =============================================================================
+setup_desktop_integration() {
+    section "8b. Desktop integration (defaults, right-click, flameshot)"
+    if [[ $SKIP_MENU -eq 1 ]]; then
+        warn "Skipped (--skip-menu)"
+        return 0
+    fi
+
+    # === VS Code as default editor ===
+    if command -v code >/dev/null 2>&1; then
+        info "Setting VS Code as default editor for text/code files..."
+
+        # Set as default for all text/code-ish MIME types
+        local vscode_mimes=(
+            text/plain
+            text/markdown
+            text/x-python
+            text/x-shellscript
+            text/x-csrc
+            text/x-c++src
+            text/x-java
+            text/x-go
+            text/x-rust
+            text/x-ruby
+            text/javascript
+            application/javascript
+            application/json
+            application/xml
+            text/xml
+            text/html
+            text/css
+            text/yaml
+            application/x-yaml
+            text/x-makefile
+            text/x-cmake
+            text/csv
+            text/x-log
+        )
+
+        for mime in "${vscode_mimes[@]}"; do
+            xdg-mime default code.desktop "$mime" 2>/dev/null || true
+        done
+
+        # Set EDITOR env var for shells
+        info "Setting \$EDITOR=code in shell rc files..."
+
+        # Fish
+        if [[ -d "$HOME/.config/fish/conf.d" ]]; then
+            cat > "$HOME/.config/fish/conf.d/editor.fish" <<'EOF'
+# Default editor: VS Code
+set -gx EDITOR "code --wait"
+set -gx VISUAL "code --wait"
+set -gx SUDO_EDITOR "code --wait"
+EOF
+        fi
+
+        # Bash
+        if [[ -f "$HOME/.bashrc" ]] && ! grep -q "EDITOR=.*code" "$HOME/.bashrc"; then
+            cat >> "$HOME/.bashrc" <<'EOF'
+
+# Default editor: VS Code
+export EDITOR="code --wait"
+export VISUAL="code --wait"
+export SUDO_EDITOR="code --wait"
+EOF
+        fi
+
+        # Zsh
+        if [[ -f "$HOME/.zshrc" ]] && ! grep -q "EDITOR=.*code" "$HOME/.zshrc"; then
+            cat >> "$HOME/.zshrc" <<'EOF'
+
+# Default editor: VS Code
+export EDITOR="code --wait"
+export VISUAL="code --wait"
+export SUDO_EDITOR="code --wait"
+EOF
+        fi
+
+        # git uses $EDITOR but be explicit
+        git config --global core.editor "code --wait"
+
+        ok "VS Code is now default editor"
+    else
+        warn "VS Code not found — skipping default editor setup"
+    fi
+
+    # === Ghostty as default terminal ===
+    if command -v ghostty >/dev/null 2>&1; then
+        info "Setting Ghostty as default terminal for KDE..."
+
+        # KDE/Plasma default terminal config
+        # Plasma 6 uses ~/.config/kdeglobals
+        local kdeglobals="$HOME/.config/kdeglobals"
+        if [[ -f "$kdeglobals" ]]; then
+            # Remove old TerminalApplication if present
+            sed -i '/^TerminalApplication=/d' "$kdeglobals"
+            sed -i '/^TerminalService=/d' "$kdeglobals"
+        fi
+
+        # Add Ghostty as terminal
+        if grep -q "^\[General\]" "$kdeglobals" 2>/dev/null; then
+            # Insert after [General]
+            sed -i '/^\[General\]$/a TerminalApplication=ghostty\nTerminalService=com.mitchellh.ghostty.desktop' "$kdeglobals"
+        else
+            cat >> "$kdeglobals" <<EOF
+
+[General]
+TerminalApplication=ghostty
+TerminalService=com.mitchellh.ghostty.desktop
+EOF
+        fi
+
+        # Default scheme handler — for "Open in Terminal" actions
+        xdg-mime default com.mitchellh.ghostty.desktop x-scheme-handler/terminal 2>/dev/null || true
+
+        # x-terminal-emulator for cli scripts that look for it (Debian-ism)
+        sudo mkdir -p /usr/local/bin
+        sudo ln -sf "$(command -v ghostty)" /usr/local/bin/x-terminal-emulator
+
+        ok "Ghostty set as default terminal"
+    else
+        warn "Ghostty not found — skipping default terminal setup"
+    fi
+
+    # === "Open Terminal Here" right-click on desktop AND Dolphin ===
+    if command -v ghostty >/dev/null 2>&1; then
+        info "Adding 'Open Terminal Here' right-click action..."
+
+        # Service menu directory (Plasma 6 path)
+        local svc_menus_dir="$HOME/.local/share/kio/servicemenus"
+        mkdir -p "$svc_menus_dir"
+
+        # Service file works in Dolphin AND on the desktop (folderview)
+        cat > "$svc_menus_dir/open-ghostty-here.desktop" <<'EOF'
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=inode/directory;
+Actions=openGhosttyHere;
+X-KDE-Priority=TopLevel
+X-KDE-StartupNotify=false
+
+[Desktop Action openGhosttyHere]
+Name=Open Terminal Here
+Icon=utilities-terminal
+Exec=ghostty --working-directory=%f
+EOF
+        chmod +x "$svc_menus_dir/open-ghostty-here.desktop"
+
+        # Plasma 5 fallback (older path, harmless if not used)
+        local svc_menus_legacy="$HOME/.local/share/kservices5/ServiceMenus"
+        mkdir -p "$svc_menus_legacy"
+        cp "$svc_menus_dir/open-ghostty-here.desktop" "$svc_menus_legacy/" 2>/dev/null || true
+
+        ok "'Open Terminal Here' added (right-click on desktop or in Dolphin)"
+    fi
+
+    # === Flameshot global keybinding (PrintScreen) ===
+    if command -v flameshot >/dev/null 2>&1; then
+        info "Configuring Flameshot global keybindings..."
+
+        # KDE custom shortcuts file
+        local khotkeysrc="$HOME/.config/kglobalshortcutsrc"
+
+        # Remove existing flameshot bindings to avoid duplicates
+        if [[ -f "$khotkeysrc" ]]; then
+            # Backup first
+            cp "$khotkeysrc" "${khotkeysrc}.bak.$(date +%s)"
+        fi
+
+        # Add Flameshot config block (Plasma uses .desktop-based shortcuts)
+        # Method: create a .desktop file in autostart that registers shortcut
+        mkdir -p "$HOME/.config/autostart"
+
+        # Make sure flameshot starts at login (so the tray icon is available)
+        if [[ ! -f "$HOME/.config/autostart/flameshot.desktop" ]]; then
+            cp /usr/share/applications/org.flameshot.Flameshot.desktop \
+               "$HOME/.config/autostart/" 2>/dev/null || \
+            cat > "$HOME/.config/autostart/flameshot.desktop" <<'EOF'
+[Desktop Entry]
+Name=Flameshot
+GenericName=Screenshot tool
+Comment=Powerful and easy to use screenshot tool
+Icon=org.flameshot.Flameshot
+Type=Application
+Exec=flameshot
+StartupNotify=false
+Terminal=false
+Categories=Graphics;Utility;
+X-GNOME-Autostart-Phase=Applications
+X-GNOME-Autostart-Delay=2
+EOF
+        fi
+
+        # Configure flameshot for multi-monitor (default behavior in v12+)
+        local fs_config="$HOME/.config/flameshot/flameshot.ini"
+        mkdir -p "$(dirname "$fs_config")"
+        if [[ ! -f "$fs_config" ]]; then
+            cat > "$fs_config" <<'EOF'
+[General]
+checkForUpdates=false
+contrastOpacity=188
+contrastUiColor=#4476ff
+disabledTrayIcon=false
+saveAfterCopy=true
+savePath=
+savePathFixed=false
+showHelp=true
+showStartupLaunchMessage=false
+startupLaunch=true
+uiColor=#4476ff
+useJpgForClipboard=false
+EOF
+            ok "Flameshot configured (multi-monitor enabled by default in v12+)"
+        fi
+
+        # Tell user how to bind PrintScreen
+        info ""
+        info "${C_YELLOW}MANUAL STEP for PrintScreen keybinding:${C_RESET}"
+        info "  1. Open: System Settings → Shortcuts → Custom Shortcuts"
+        info "  2. Edit > New > Global Shortcut > Command/URL"
+        info "  3. Name:     'Flameshot screenshot'"
+        info "     Trigger:  Print key"
+        info "     Action:   flameshot gui"
+        info "  Or run: ${C_BOLD}flameshot gui${C_RESET} from command line"
+        info ""
+        info "${C_YELLOW}Alternative — disable KDE's built-in Spectacle on PrintScreen:${C_RESET}"
+        info "  System Settings → Shortcuts → Spectacle"
+        info "  Clear all 'Print' bindings, then add to Flameshot above"
+    fi
+
+    ok "Desktop integration done"
+}
+
+# =============================================================================
 # 9. KDE Application Menu — BlackArch-style folders
 # =============================================================================
 setup_kde_menu() {
@@ -538,6 +1275,7 @@ setup_kde_menu() {
         [Pentest-Exploit]="Exploitation|applications-debugging"
         [Pentest-PostExploit]="Post-Exploitation|system-run"
         [Pentest-AD]="Active Directory|preferences-system-network"
+        [Pentest-Tunnel]="Tunneling/Pivot|network-vpn"
         [Pentest-Forensic]="Forensics|drive-removable-media"
         [Pentest-Reverse]="Reverse Engineering|applications-development"
         [Pentest-Sniffer]="Sniffers"
@@ -701,6 +1439,22 @@ EOF
     </Menu>
 
     <Menu>
+      <Name>Tunneling/Pivot</Name>
+      <Directory>Pentest-Tunnel.directory</Directory>
+      <Include>
+        <Or>
+          <Filename>ligolo-ng.desktop</Filename>
+          <Filename>ligolo.desktop</Filename>
+          <Filename>chisel.desktop</Filename>
+          <Filename>sshuttle.desktop</Filename>
+          <Filename>gost.desktop</Filename>
+          <Filename>proxychains4.desktop</Filename>
+          <Filename>proxychains.desktop</Filename>
+        </Or>
+      </Include>
+    </Menu>
+
+    <Menu>
       <Name>Forensics</Name>
       <Directory>Pentest-Forensic.directory</Directory>
       <Include>
@@ -753,11 +1507,15 @@ MENU_EOF
     info "Generating .desktop entries for CLI tools..."
     declare -A cli_tools=(
         [nmap]="Nmap|edit-find|nmap"
+        [rustscan]="RustScan|edit-find|rustscan"
+        [masscan]="masscan|edit-find|sudo masscan -h; read"
         [sqlmap]="sqlmap|edit-find|sqlmap"
         [gobuster]="Gobuster|edit-find|gobuster"
         [feroxbuster]="Feroxbuster|edit-find|feroxbuster"
         [ffuf]="ffuf|edit-find|ffuf"
         [nuclei]="Nuclei|edit-find|nuclei"
+        [amass]="Amass|edit-find|amass"
+        [subfinder]="Subfinder|edit-find|subfinder"
         [hydra]="Hydra|dialog-password|hydra"
         [john]="John the Ripper|dialog-password|john --help; read"
         [hashcat]="Hashcat|dialog-password|hashcat -h; read"
@@ -771,11 +1529,23 @@ MENU_EOF
         [aircrack-ng]="Aircrack-ng|network-wireless|aircrack-ng --help; read"
         [bettercap]="Bettercap|network-wireless|sudo bettercap"
         [kerbrute]="Kerbrute|preferences-system-network|kerbrute"
+        [certipy]="Certipy (AD CS)|preferences-system-network|certipy -h; read"
         [autorecon]="AutoRecon|system-search|autorecon"
         [linpeas]="linPEAS|system-run|linpeas"
         [winpeas]="winPEAS|system-run|winpeas"
         [proxychains4]="ProxyChains|preferences-system-network|proxychains4 -h; read"
         [evil-winrm]="Evil-WinRM|preferences-system-network|evil-winrm"
+        [sliver]="Sliver C2|applications-debugging|sliver"
+        [sliver-server]="Sliver Server|applications-debugging|sudo sliver-server"
+        [pwncat-cs]="pwncat-cs|applications-debugging|pwncat-cs"
+        [ligolo-proxy]="Ligolo-ng Proxy|network-vpn|sudo ligolo-proxy -h; read"
+        [chisel]="Chisel|network-vpn|chisel --help; read"
+        [sshuttle]="sshuttle|network-vpn|sshuttle --help; read"
+        [enum4linux]="enum4linux|preferences-system-network|enum4linux"
+        [smbmap]="smbmap|preferences-system-network|smbmap -h; read"
+        [hashid]="hash-identifier|dialog-password|hashid"
+        [cewl]="CeWL|edit-find|cewl --help; read"
+        [pspy]="pspy|system-run|pspy"
     )
 
     for cmd in "${!cli_tools[@]}"; do
@@ -825,31 +1595,86 @@ final_summary() {
   ${C_GREEN}✓${C_RESET} Daily apps:    Chrome, Joplin, VS Code, Ghostty
   ${C_GREEN}✓${C_RESET} Dev tools:     git, python, node, go, rust, fish, zsh
   ${C_GREEN}✓${C_RESET} CLI utilities: eza, bat, fd, ripgrep, fzf, btop
-  ${C_GREEN}✓${C_RESET} Kali basics:   netcat, rlwrap, gobuster, ffuf, hashcat, etc.
+  ${C_GREEN}✓${C_RESET} Kali basics:   netcat, rlwrap, gobuster, ffuf, hashcat,
+                  nmap, masscan, sqlmap, nuclei, smbmap, enum4linux,
+                  metasploit, exploitdb, wireshark, aircrack-ng, etc.
 EOF
 
     [[ $SKIP_BLACKARCH -eq 0 && $SKIP_PENTEST -eq 0 ]] && cat <<EOF
-  ${C_GREEN}✓${C_RESET} BlackArch:     repo + officials metapackage
-  ${C_GREEN}✓${C_RESET} Wordlists:     seclists, wordlists, fuzzdb
+  ${C_GREEN}✓${C_RESET} BlackArch:     repo + officials metapackage (~150 tools)
+  ${C_GREEN}✓${C_RESET} Wordlists:     seclists, wordlists, fuzzdb (rockyou auto-decompressed)
 EOF
 
     [[ $SKIP_AUR -eq 0 && $SKIP_PENTEST -eq 0 ]] && cat <<EOF
-  ${C_GREEN}✓${C_RESET} AUR pentest:   kerbrute, autorecon, certipy, sliver, netexec, ghidra, burpsuite
+  ${C_GREEN}✓${C_RESET} AUR pentest:   ${C_BOLD}Active Directory:${C_RESET}  kerbrute, certipy, netexec(nxc),
+                                      evil-winrm, BloodHound (py+rust),
+                                      adidnsdump, powerview, pywerview
+                  ${C_BOLD}Tunneling/Pivot:${C_RESET}   ${C_YELLOW}ligolo-ng${C_RESET}, chisel, sshuttle, gost
+                  ${C_BOLD}Web Testing:${C_RESET}      Burp, ZAP, caido, amass, subfinder,
+                                      httpx, katana, dalfox
+                  ${C_BOLD}Exploitation/C2:${C_RESET}  sliver, pwncat-cs, msfpc
+                  ${C_BOLD}Recon:${C_RESET}            autorecon, rustscan, gowitness, eyewitness
+                  ${C_BOLD}Privesc:${C_RESET}          peass-ng (lin/winpeas), pspy, exploit-suggester
+                  ${C_BOLD}Cracking:${C_RESET}         crackmapexec, hashid, hcxtools
+                  ${C_BOLD}Reverse Eng:${C_RESET}      ghidra, cutter, pwndbg, gef, peda
+                  ${C_BOLD}Misc:${C_RESET}             PayloadsAllTheThings, sherlock, gitleaks
+EOF
+
+    [[ $SKIP_PENTEST -eq 0 ]] && cat <<EOF
+  ${C_GREEN}✓${C_RESET} Manual tools:  ~/.local/share/pentest-tools/
+                  ├── PEASS-ng/         (linpeas + winpeas)
+                  ├── PowerSploit/
+                  ├── PayloadsAllTheThings/
+                  ├── hacktricks/       (offline reference)
+                  ├── mimikatz/
+                  ├── ligolo-ng/        (proxy_linux + agent.exe)
+                  ├── chisel/           (linux + windows binaries)
+                  └── static-bins/      (static nmap, socat for upload)
+  ${C_GREEN}✓${C_RESET} Python libs:   pwntools, ldap3, dnspython, ROPgadget,
+                  capstone, unicorn, keystone, bloodhound
 EOF
 
     [[ $SKIP_MENU -eq 0 && $SKIP_PENTEST -eq 0 ]] && cat <<EOF
-  ${C_GREEN}✓${C_RESET} KDE Menu:      Pentest Tools/ folder with subcategories
+  ${C_GREEN}✓${C_RESET} KDE Menu:      Pentest Tools/ folder with 12 subcategories
+  ${C_GREEN}✓${C_RESET} Default editor: VS Code (text/code/json/etc files)
+  ${C_GREEN}✓${C_RESET} Default term:  Ghostty (Konsole replaced)
+  ${C_GREEN}✓${C_RESET} Right-click:   "Open Terminal Here" on desktop & Dolphin
+  ${C_GREEN}✓${C_RESET} Flameshot:     installed + autostart enabled (multi-monitor)
+  ${C_GREEN}✓${C_RESET} Wordlists:     Kali-compatible paths under /usr/share/wordlists/
+                  ├── seclists  → /usr/share/seclists
+                  ├── dirb      → /usr/share/dirb/wordlists
+                  ├── dirbuster → seclists/Discovery/Web-Content
+                  ├── fuzzdb    → /usr/share/fuzzdb
+                  └── rockyou.txt
 EOF
 
     cat <<EOF
 
   ${C_YELLOW}Next steps:${C_RESET}
-    1. ${C_BOLD}Logout / login${C_RESET} for wireshark group + KDE menu refresh
+    1. ${C_BOLD}Logout / login${C_RESET} for wireshark group + KDE menu refresh + env vars
     2. Test:  ${C_BOLD}nmap -sV scanme.nmap.org${C_RESET}     (no sudo needed!)
-    3. Open KDE Application Menu — look for ${C_BOLD}'Pentest Tools'${C_RESET}
-    4. If menu doesn't show: kbuildsycoca6 --noincremental
+    3. Test:  Right-click on desktop → "Open Terminal Here"   (should open Ghostty)
+    4. Test:  ${C_BOLD}ls /usr/share/wordlists/${C_RESET}     (should show seclists, dirb, dirbuster, ...)
+    5. ${C_YELLOW}Bind Flameshot to PrintScreen:${C_RESET}
+       System Settings → Shortcuts → Spectacle → clear all 'Print' bindings
+       System Settings → Shortcuts → Custom → New → Global Shortcut → Command
+       Name: "Flameshot"  |  Trigger: Print  |  Action: ${C_BOLD}flameshot gui${C_RESET}
+    6. Open KDE Application Menu — find ${C_BOLD}'Pentest Tools'${C_RESET}
+    7. Useful env vars (set in fish/bash/zsh):
+       ${C_BOLD}\$PEASS${C_RESET}        → linpeas/winpeas folder
+       ${C_BOLD}\$PAYLOADS${C_RESET}     → PayloadsAllTheThings folder
+       ${C_BOLD}\$LIGOLO${C_RESET}       → ligolo-ng binaries
+       ${C_BOLD}\$CHISEL${C_RESET}       → chisel binaries
+       ${C_BOLD}\$STATIC_BINS${C_RESET}  → static binaries for upload
+       ${C_BOLD}\$EDITOR${C_RESET}       → "code --wait"
+    8. Quick aliases:
+       ${C_BOLD}linpeas-here${C_RESET}    copies linpeas.sh to current dir
+       ${C_BOLD}winpeas-here${C_RESET}    copies winPEASx64.exe to current dir
+       ${C_BOLD}serve-tools${C_RESET}     starts python http.server in tools dir
 
   ${C_BLUE}Log file:${C_RESET} $LOG_FILE
+
+  ${C_GREEN}OSCP-ready setup complete. Time to break things responsibly.${C_RESET}
 
 EOF
 }
@@ -871,7 +1696,10 @@ main() {
     setup_blackarch
     install_daily_apps
     install_aur_pentest
+    install_manual_tools
+    install_python_pentest_libs
     fix_kali_compatibility
+    setup_desktop_integration
     setup_kde_menu
     final_summary
 }
